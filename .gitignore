@@ -1,0 +1,39 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/*
+venv/*
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local environment files
+.env
+.env.*
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Uploaded/generated app data
+server/uploaded_files/*
+!server/uploaded_files/.gitkeep
+server/model-images/*
+!server/model-images/.gitkeep
+server/view-model-architecture/*
+!server/view-model-architecture/.gitkeep
+
+# Generated model artifacts
+server/model/result/*
+!server/model/result/.gitkeep

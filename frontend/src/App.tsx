@@ -346,6 +346,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [lastReportPromptReportId, setLastReportPromptReportId] = useState<string | null>(null);
+  const activePollRef = useRef<{ evaluationId: string; token: number } | null>(null);
 
   const metricRows = useMemo(() => {
     if (!evaluation) {
@@ -444,11 +445,19 @@ export default function App() {
     evaluationId: string,
     options: { afterRetraining?: boolean; sourceReportId?: string } = {},
   ) {
+    if (activePollRef.current?.evaluationId === evaluationId) {
+      return;
+    }
+    const token = Date.now();
+    activePollRef.current = { evaluationId, token };
     setPollingEvaluationId(evaluationId);
     setError(null);
 
     try {
       let nextEvaluation = await getEvaluation(evaluationId);
+      if (activePollRef.current?.token !== token) {
+        return;
+      }
       setEvaluation(nextEvaluation);
       if (options.afterRetraining) {
         setTrainingJob((currentJob) =>
@@ -459,8 +468,14 @@ export default function App() {
       }
 
       while (isEvaluationActive(nextEvaluation)) {
-        await delay(850);
+        await delay(pollingDelayForStatus(nextEvaluation.status));
+        if (activePollRef.current?.token !== token) {
+          return;
+        }
         nextEvaluation = await getEvaluation(evaluationId);
+        if (activePollRef.current?.token !== token) {
+          return;
+        }
         setEvaluation(nextEvaluation);
         if (options.afterRetraining) {
           setTrainingJob((currentJob) =>
@@ -472,6 +487,9 @@ export default function App() {
       }
 
       const latestReport = await refreshSideData();
+      if (activePollRef.current?.token !== token) {
+        return;
+      }
       const shouldHideSourceReport =
         options.sourceReportId && latestReport?.report_id === options.sourceReportId;
 
@@ -494,7 +512,10 @@ export default function App() {
     } catch (pollError) {
       setError(getErrorMessage(pollError));
     } finally {
-      setPollingEvaluationId(null);
+      if (activePollRef.current?.token === token) {
+        activePollRef.current = null;
+        setPollingEvaluationId(null);
+      }
     }
   }
 

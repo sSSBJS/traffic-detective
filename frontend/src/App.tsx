@@ -726,7 +726,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-zinc-200">
-      <HeaderNav />
+      <HeaderNav
+        statusLabel={healthLabels[healthStatus]}
+        datasetId={systemStatus?.target_config.dataset_id}
+        metric={systemStatus?.target_config.metric}
+      />
 
       <main className="mx-auto max-w-7xl space-y-10 px-5 py-10 lg:px-8">
         {error ? (

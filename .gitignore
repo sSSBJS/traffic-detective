@@ -46,3 +46,6 @@ server/view-model-architecture/*
 # Generated model artifacts
 server/model/result/*
 !server/model/result/.gitkeep
+server/model/runtime/*
+!server/model/runtime/.gitkeep
+!server/model/runtime/active_traffic_model.pkl

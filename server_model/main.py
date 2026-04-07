@@ -68,24 +68,23 @@ api_router = APIRouter(prefix="/api/v1")
 
 SYSTEM_NAME = "traffic-aiops-studio"
 TARGET_CONFIG = {
-    "dataset_id": "cesnet_v1",
+    "dataset_id": "605036",
     "entity_id": "router_01",
-    "metric": "bytes_per_sec",
+    "metric": "n_flows",
     "evaluation_interval": "manual_or_scheduled",
     "retraining_window_days": 30,
     "batch_unit": "day",
     "batch_size": 7,
 }
-BASELINE_METRICS = {"rmse": 125.0, "smape": 10.0, "r2": -7.0}
-MVP_CURRENT_METRICS = {"rmse": 139.3, "smape": 11.8, "r2": -7.82}
-RETRAINING_THRESHOLD_RATIO = float(os.getenv("RETRAINING_THRESHOLD_RATIO", "0.15"))
+FALLBACK_BASELINE_METRICS = {"rmse": 0.0, "smape": 0.0, "r2": 0.0}
+RETRAINING_THRESHOLD_RATIO = float(os.getenv("RETRAINING_THRESHOLD_RATIO", "0.60"))
 RETRAINING_STALE_AFTER_DAYS = int(os.getenv("RETRAINING_STALE_AFTER_DAYS", "30"))
 OPENAI_REPORT_MODEL = os.getenv("OPENAI_REPORT_MODEL", "gpt-5-mini")
 OPENAI_REPORT_TIMEOUT_SECONDS = float(os.getenv("OPENAI_REPORT_TIMEOUT_SECONDS", "45"))
 MODEL_ARTIFACT_DIR = Path(os.getenv("MODEL_ARTIFACT_DIR", str(Path(MODEL_DIR) / "runtime"))).resolve()
-MODEL_LOADER_MODULE = os.getenv("MODEL_LOADER_MODULE")
-MODEL_EVALUATOR_MODULE = os.getenv("MODEL_EVALUATOR_MODULE")
-MODEL_TRAINER_MODULE = os.getenv("MODEL_TRAINER_MODULE")
+MODEL_LOADER_MODULE = os.getenv("MODEL_LOADER_MODULE", "server_model.traffic_model_loader").strip() or "server_model.traffic_model_loader"
+MODEL_EVALUATOR_MODULE = os.getenv("MODEL_EVALUATOR_MODULE", "server_model.traffic_model_evaluator").strip() or "server_model.traffic_model_evaluator"
+MODEL_TRAINER_MODULE = os.getenv("MODEL_TRAINER_MODULE", "server_model.traffic_model_trainer").strip() or "server_model.traffic_model_trainer"
 BATCH_EVALUATION_DELAY_SECONDS = float(os.getenv("BATCH_EVALUATION_DELAY_SECONDS", "1.25"))
 APP_STATE_LOCK = RLock()
 MODEL_UPDATE_LOCK = RLock()
@@ -162,6 +161,15 @@ def _build_comparison(current_metrics: Dict[str, float], baseline_metrics: Dict[
         "rmse_change_rate": _change_rate(current_metrics["rmse"], baseline_metrics["rmse"]),
         "smape_change_rate": _change_rate(current_metrics["smape"], baseline_metrics["smape"]),
         "r2_drop": round(baseline_metrics["r2"] - current_metrics["r2"], 2),
+    }
+
+
+def _baseline_metrics() -> Dict[str, float]:
+    champion = APP_STATE["champion_model"]
+    return {
+        "rmse": float(champion.get("rmse") if champion.get("rmse") is not None else FALLBACK_BASELINE_METRICS["rmse"]),
+        "smape": float(champion.get("smape") if champion.get("smape") is not None else FALLBACK_BASELINE_METRICS["smape"]),
+        "r2": float(champion.get("r2") if champion.get("r2") is not None else FALLBACK_BASELINE_METRICS["r2"]),
     }
 
 
@@ -352,6 +360,45 @@ def _build_test_batches(
     start_batch_index: int = 0,
 ) -> list[Dict[str, Any]]:
     max_batches = max(1, min(max_batches, 12))
+    try:
+        trainer_module = importlib.import_module("server_model.traffic_model_train")
+        load_evaluation_series = getattr(trainer_module, "load_evaluation_series", None)
+        if callable(load_evaluation_series):
+            series = load_evaluation_series()
+            batch_size = 7
+            if len(series) > 1:
+                delta_seconds = (series.iloc[1]["timestamp"] - series.iloc[0]["timestamp"]).total_seconds()
+                if delta_seconds > 0:
+                    batch_size = max(1, int(round((7 * 24 * 60 * 60) / delta_seconds)))
+            total_available = len(series) // batch_size
+            if total_available > 0:
+                batches: list[Dict[str, Any]] = []
+                final_batch_index = min(start_batch_index + max_batches, total_available)
+                for index in range(start_batch_index, final_batch_index):
+                    window = series.iloc[index * batch_size : (index + 1) * batch_size].reset_index(drop=True)
+                    points = [
+                        {
+                            "timestamp": row["timestamp"].isoformat(),
+                            "actual": round(float(row["actual"]), 2),
+                            "predicted": round(float(row["actual"]), 2),
+                        }
+                        for _, row in window.iterrows()
+                    ]
+                    batches.append(
+                        {
+                            "batch_id": f"batch_{index + 1:03d}",
+                            "batch_index": index,
+                            "window_days": 7,
+                            "start_at": points[0]["timestamp"],
+                            "end_at": points[-1]["timestamp"],
+                            "forecast_points": points,
+                        }
+                    )
+                if batches:
+                    return batches
+    except Exception:
+        pass
+
     batches: list[Dict[str, Any]] = []
     for index in range(start_batch_index, start_batch_index + max_batches):
         points = _build_batch_forecast_series(index, after_retraining=after_retraining)
@@ -428,7 +475,7 @@ def _evaluate_batch_with_model(batch: Dict[str, Any], after_retraining: bool = F
 
 def _current_metrics_from_batch(batch_result: Optional[Dict[str, Any]]) -> Dict[str, float]:
     if not batch_result:
-        return dict(BASELINE_METRICS)
+        return _baseline_metrics()
     return batch_result["metrics"]
 
 
@@ -682,7 +729,10 @@ def _load_model_object(artifact_path: Path, loader_module: Optional[str]) -> tup
         )
 
     try:
-        return loader(str(artifact_path)), f"loaded_by_{module_name}"
+        model_object = loader(str(artifact_path))
+        if isinstance(model_object, dict):
+            model_object["artifact_path"] = str(artifact_path)
+        return model_object, f"loaded_by_{module_name}"
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to load model artifact: {exc}") from exc
 
@@ -697,8 +747,7 @@ def _activate_runtime_model(payload: ModelUpdateRequest) -> Dict[str, Any]:
                 artifact_path = Path(existing_path)
             else:
                 MODEL_ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
-                artifact_path = MODEL_ARTIFACT_DIR / "active_model.placeholder"
-                artifact_path.write_text("mvp active traffic model placeholder", encoding="utf-8")
+                artifact_path = MODEL_ARTIFACT_DIR / "active_traffic_model.pkl"
         model_object, load_status = _load_model_object(artifact_path, payload.loader_module)
         previous_model = _runtime_model_public()
         activated_at = _iso()
@@ -744,6 +793,77 @@ def _activate_runtime_model(payload: ModelUpdateRequest) -> Dict[str, Any]:
         }
 
 
+def _metadata_from_model_object(model_object: Any) -> Dict[str, Any]:
+    if not isinstance(model_object, dict):
+        return {}
+    keys = (
+        "model_key",
+        "display_name",
+        "metric",
+        "order",
+        "seasonal_order",
+        "rmse",
+        "smape",
+        "r2",
+        "train_rmse",
+        "train_smape",
+        "train_r2",
+        "rmse_threshold",
+        "train_rows",
+        "train_start_at",
+        "train_end_at",
+    )
+    return {key: model_object[key] for key in keys if key in model_object}
+
+
+def _load_startup_runtime_model() -> None:
+    artifact_path = MODEL_ARTIFACT_DIR / "active_traffic_model.pkl"
+    model_object, load_status = _load_model_object(artifact_path, MODEL_LOADER_MODULE)
+    metadata = _metadata_from_model_object(model_object)
+    trained_at = (
+        model_object.get("trained_at")
+        if isinstance(model_object, dict) and isinstance(model_object.get("trained_at"), str)
+        else _iso()
+    )
+    model_name = (
+        model_object.get("display_name")
+        if isinstance(model_object, dict) and isinstance(model_object.get("display_name"), str)
+        else "Traffic Forecast Model"
+    )
+    APP_STATE["runtime_model"] = {
+        "model_version_id": APP_STATE["champion_model"]["model_version_id"],
+        "model_name": model_name,
+        "artifact_path": str(artifact_path),
+        "trained_at": trained_at,
+        "activated_at": _iso(),
+        "loader_module": MODEL_LOADER_MODULE,
+        "load_status": load_status,
+        "source": "startup_pretrained_artifact",
+        "metadata": metadata,
+    }
+    APP_STATE["runtime_model_object"] = model_object
+    APP_STATE["champion_model"] = {
+        "model_version_id": APP_STATE["champion_model"]["model_version_id"],
+        "model_name": model_name,
+        "trained_at_dt": _now(),
+        "trained_at": trained_at,
+        "rmse": float(metadata.get("rmse", metadata.get("train_rmse", metadata.get("rmse_threshold", FALLBACK_BASELINE_METRICS["rmse"])))),
+        "smape": float(metadata.get("smape", metadata.get("train_smape", FALLBACK_BASELINE_METRICS["smape"]))),
+        "r2": float(metadata.get("r2", metadata.get("train_r2", FALLBACK_BASELINE_METRICS["r2"]))),
+    }
+    APP_STATE["latest_health_status"] = "healthy"
+    _append_session_event(
+        {
+            "type": "startup_model_load",
+            "model_version_id": APP_STATE["champion_model"]["model_version_id"],
+            "model_name": model_name,
+            "artifact_path": str(artifact_path),
+            "load_status": load_status,
+            "source": "pretrained_pkl",
+        }
+    )
+
+
 def _retrain_overwrite_model(training_batches: list[Dict[str, Any]], payload: TrainingJobRequest, job_id: str) -> Dict[str, Any]:
     with MODEL_UPDATE_LOCK:
         MODEL_ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
@@ -751,7 +871,7 @@ def _retrain_overwrite_model(training_batches: list[Dict[str, Any]], payload: Tr
         target_path = (
             Path(payload.artifact_path).expanduser().resolve()
             if payload.artifact_path
-            else MODEL_ARTIFACT_DIR / "active_traffic_model.placeholder"
+            else MODEL_ARTIFACT_DIR / "active_traffic_model.pkl"
         )
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -803,6 +923,7 @@ def _retrain_overwrite_model(training_batches: list[Dict[str, Any]], payload: Tr
             load_status = f"{trainer_status}:{loader_status}"
 
         trained_at = _iso()
+        model_metadata = _metadata_from_model_object(model_object)
         runtime_model = {
             "model_version_id": current_runtime["model_version_id"],
             "model_name": payload.model_name or current_runtime["model_name"],
@@ -813,6 +934,7 @@ def _retrain_overwrite_model(training_batches: list[Dict[str, Any]], payload: Tr
             "load_status": load_status,
             "source": "retraining_overwrite",
             "metadata": {
+                **model_metadata,
                 "job_id": job_id,
                 "overwrite": True,
                 "training_batch_ids": [batch["batch_id"] for batch in training_batches],
@@ -826,9 +948,9 @@ def _retrain_overwrite_model(training_batches: list[Dict[str, Any]], payload: Tr
             "model_name": runtime_model["model_name"],
             "trained_at_dt": _now(),
             "trained_at": trained_at,
-            "rmse": BASELINE_METRICS["rmse"],
-            "smape": BASELINE_METRICS["smape"],
-            "r2": BASELINE_METRICS["r2"],
+            "rmse": float(model_metadata.get("rmse", model_metadata.get("train_rmse", FALLBACK_BASELINE_METRICS["rmse"]))),
+            "smape": float(model_metadata.get("smape", model_metadata.get("train_smape", FALLBACK_BASELINE_METRICS["smape"]))),
+            "r2": float(model_metadata.get("r2", model_metadata.get("train_r2", FALLBACK_BASELINE_METRICS["r2"]))),
         }
         APP_STATE["latest_health_status"] = "healthy"
         _append_session_event(
@@ -879,6 +1001,13 @@ def _training_scope(batch_results: list[Dict[str, Any]], failed_batch: Optional[
         for batch in batch_results
         if not failed_batch or batch["batch_index"] < failed_batch["batch_index"]
     ]
+    if failed_batch and not previous_batches:
+        return {
+            "strategy": "failed_batch_fallback",
+            "batch_ids": [failed_batch["batch_id"]],
+            "until": failed_batch["end_at"],
+            "note": "첫 평가 배치에서 재학습 필요 상태가 감지되어 해당 배치를 재학습 데이터로 사용합니다.",
+        }
     return {
         "strategy": "before_failed_batch",
         "batch_ids": [batch["batch_id"] for batch in previous_batches],
@@ -894,7 +1023,7 @@ def _apply_evaluation_summary(evaluation: Dict[str, Any], failed_batch: Optional
         {
             "status": "stopped_on_retrain_required" if failed_batch else "completed",
             "current_metrics": current_metrics,
-            "comparison": _build_comparison(current_metrics, BASELINE_METRICS),
+            "comparison": _build_comparison(current_metrics, _baseline_metrics()),
             "health_status": health_status,
             "recommended_action": "retrain" if failed_batch else "keep_current_model",
             "failed_batch": failed_batch,
@@ -929,7 +1058,7 @@ def _new_evaluation_state(payload: EvaluationRequest) -> Dict[str, Any]:
         "status": "queued",
         "trigger_type": payload.trigger_type,
         "current_metrics": {"rmse": 0.0, "smape": 0.0, "r2": 0.0},
-        "baseline_metrics": dict(BASELINE_METRICS),
+        "baseline_metrics": _baseline_metrics(),
         "comparison": {"rmse_change_rate": 0.0, "smape_change_rate": 0.0, "r2_drop": 0.0},
         "health_status": "unknown",
         "recommended_action": "evaluate",
@@ -1038,7 +1167,7 @@ def _run_batch_evaluation_worker(evaluation_id: str, payload: EvaluationRequest)
                 evaluation = APP_STATE["evaluations"][evaluation_id]
                 evaluation["batch_results"].append(batch_result)
                 evaluation["current_metrics"] = batch_result["metrics"]
-                evaluation["comparison"] = _build_comparison(batch_result["metrics"], BASELINE_METRICS)
+                evaluation["comparison"] = _build_comparison(batch_result["metrics"], _baseline_metrics())
                 evaluation["forecast_points"] = batch_result["forecast_points"]
                 evaluation["progress_percent"] = round(
                     len(evaluation["batch_results"]) / max(evaluation["total_batches"], 1) * 100
@@ -1120,9 +1249,9 @@ APP_STATE: Dict[str, Any] = {
         "model_name": "lstm_mvp_placeholder",
         "trained_at_dt": _now() - timedelta(days=12),
         "trained_at": _iso(_now() - timedelta(days=12)),
-        "rmse": BASELINE_METRICS["rmse"],
-        "smape": BASELINE_METRICS["smape"],
-        "r2": BASELINE_METRICS["r2"],
+        "rmse": None,
+        "smape": None,
+        "r2": None,
     },
     "latest_health_status": "unknown",
     "latest_evaluation": None,
@@ -1164,6 +1293,7 @@ async def lifespan(app: FastAPI):
     # 정적/결과 디렉터리 보장
     for d in (PUBLIC_DIR, UPLOAD_DIR, IMAGE_DIR, MODEL_IMG_DIR, MODEL_ARTIFACT_DIR):
         Path(d).mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(_load_startup_runtime_model)
     yield
     # 종료 시 별도 정리 없음
 
@@ -1377,6 +1507,14 @@ def create_training_job(payload: TrainingJobRequest):
         if batch["batch_id"] in training_batch_ids
     ]
     failed_batch = source_evaluation.get("failed_batch")
+    if not training_batches and failed_batch:
+        training_batches = [failed_batch]
+        source_evaluation["training_scope"] = {
+            "strategy": "failed_batch_fallback",
+            "batch_ids": [failed_batch["batch_id"]],
+            "until": failed_batch["end_at"],
+            "note": "재학습 scope가 비어 있어 실패 배치를 재학습 데이터로 사용합니다.",
+        }
     next_batch_index = (
         failed_batch["batch_index"] + 1
         if failed_batch

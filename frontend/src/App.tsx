@@ -624,7 +624,7 @@ export default function App() {
 
         <section id="dashboard" className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="relative overflow-hidden rounded-2xl border border-zinc-800/90 bg-zinc-900/50 p-6 shadow-xl shadow-black/20 ring-1 ring-violet-500/10 backdrop-blur-sm">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-violet-600 via-violet-800 to-zinc-950" />
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-violet-400/75" />
             <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <p className="m-0 text-xs font-semibold uppercase tracking-wider text-zinc-500">
@@ -644,8 +644,8 @@ export default function App() {
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:gap-4">
-              <div className="min-w-0 rounded-xl border border-zinc-700/80 bg-zinc-950/50 p-3 ring-1 ring-violet-500/5 sm:p-4">
+            <div className="flex w-full flex-col gap-3">
+              <div className="min-w-0 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/50 p-3 ring-1 ring-violet-300/12 sm:p-4">
                 <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:text-xs">
                   Champion
                 </p>
@@ -656,7 +656,7 @@ export default function App() {
                   {systemStatus?.champion_model.model_version_id ?? "—"}
                 </p>
               </div>
-              <div className="min-w-0 rounded-xl border border-zinc-700/80 bg-zinc-950/50 p-3 ring-1 ring-violet-500/5 sm:p-4">
+              <div className="min-w-0 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/50 p-3 ring-1 ring-violet-300/12 sm:p-4">
                 <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:text-xs">
                   마지막 학습
                 </p>
@@ -664,7 +664,7 @@ export default function App() {
                   {formatDate(systemStatus?.champion_model.trained_at)}
                 </p>
               </div>
-              <div className="min-w-0 rounded-xl border border-zinc-700/80 bg-zinc-950/50 p-3 ring-1 ring-violet-500/5 sm:p-4">
+              <div className="min-w-0 w-full rounded-xl border border-zinc-700/80 bg-zinc-950/50 p-3 ring-1 ring-violet-300/12 sm:p-4">
                 <p className="m-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 sm:text-xs">
                   운영 지표
                 </p>
@@ -685,7 +685,7 @@ export default function App() {
                   void handleEvaluation();
                 }}
                 disabled={activeAction === "evaluation" || isLoading || isCurrentEvaluationActive}
-                className="inline-flex items-center justify-center rounded-xl bg-gradient-to-b from-violet-600 to-violet-800 px-5 py-3 text-sm font-semibold text-white shadow-lg shadow-violet-950/40 ring-1 ring-violet-400/20 transition hover:from-violet-500 hover:to-violet-700 disabled:cursor-not-allowed disabled:from-zinc-700 disabled:to-zinc-800 disabled:text-zinc-500 disabled:shadow-none disabled:ring-0"
+                className="inline-flex items-center justify-center rounded-xl bg-violet-400 px-5 py-3 text-sm font-semibold text-violet-950 shadow-sm transition hover:bg-violet-300 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500 disabled:shadow-none"
               >
                 {activeAction === "evaluation" || isCurrentEvaluationActive
                   ? "평가 중…"
@@ -693,14 +693,14 @@ export default function App() {
               </button>
             </div>
             {activeAction === "evaluation" || isCurrentEvaluationActive ? (
-              <div className="mt-8 overflow-hidden rounded-2xl border border-violet-500/25 bg-gradient-to-br from-violet-950/40 to-zinc-950/80 p-5 ring-1 ring-violet-500/15">
-                <div className="mb-1 flex items-center justify-between text-xs font-medium text-violet-200">
+              <div className="mt-8 overflow-hidden rounded-2xl border border-violet-500/20 bg-zinc-950/90 p-5 ring-1 ring-violet-400/10">
+                <div className="mb-1 flex items-center justify-between text-xs font-medium text-violet-200/95">
                   <span>배치 진행률</span>
                   <span className="tabular-nums-pro">{evaluation?.progress_percent ?? 0}%</span>
                 </div>
                 <div className="h-2.5 overflow-hidden rounded-full bg-zinc-800">
                   <div
-                    className="h-full rounded-full bg-gradient-to-r from-violet-500 to-violet-400 transition-all duration-300"
+                    className="h-full rounded-full bg-violet-400 transition-all duration-300"
                     style={{ width: `${Math.max(evaluation?.progress_percent ?? 8, 8)}%` }}
                   />
                 </div>
@@ -1050,7 +1050,7 @@ export default function App() {
                   void handleRetrainRequest();
                 }}
                 disabled={!canRetrain || activeAction === "retrain"}
-                className="w-full rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-violet-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500 sm:w-auto"
+                className="w-full rounded-lg bg-violet-400 px-4 py-2.5 text-sm font-semibold text-violet-950 hover:bg-violet-300 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500 sm:w-auto"
               >
                 재학습 요청
               </button>

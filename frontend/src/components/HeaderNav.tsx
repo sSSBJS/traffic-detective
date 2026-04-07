@@ -7,24 +7,29 @@ const navItems = [
 
 export function HeaderNav() {
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 lg:px-8">
-        <a href="#dashboard" className="flex items-center gap-3 text-slate-900 no-underline">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-950 text-sm font-bold text-white">
+    <header className="sticky top-0 z-40 border-b border-violet-500/15 bg-zinc-950/85 backdrop-blur-md">
+      <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 lg:px-8">
+        <a
+          href="#dashboard"
+          className="group flex items-center gap-3 text-zinc-100 no-underline"
+        >
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-violet-900 text-sm font-bold tracking-tight text-white shadow-lg shadow-violet-950/40 ring-1 ring-violet-400/20 transition group-hover:shadow-violet-900/50">
             TA
           </div>
           <div>
-            <p className="m-0 text-xs font-semibold text-slate-500">Traffic AIOps</p>
-            <p className="m-0 text-lg font-bold">Studio</p>
+            <p className="m-0 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+              Traffic AIOps
+            </p>
+            <p className="m-0 text-lg font-semibold tracking-tight text-zinc-100">Studio</p>
           </div>
         </a>
 
-        <nav className="hidden gap-2 md:flex">
+        <nav className="hidden items-center gap-1 md:flex">
           {navItems.map((item) => (
             <a
               key={item.href}
               href={item.href}
-              className="rounded-md px-3 py-2 text-sm font-medium text-slate-600 no-underline transition hover:bg-slate-950 hover:text-white"
+              className="rounded-full px-3.5 py-2 text-sm font-medium text-zinc-400 no-underline transition hover:bg-violet-500/10 hover:text-zinc-100"
             >
               {item.label}
             </a>

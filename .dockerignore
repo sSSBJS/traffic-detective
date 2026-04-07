@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.DS_Store
+frontend/node_modules
+frontend/dist
+node_modules
+dist
+server/uploaded_files
+server/view-model-architecture
+server/model-images

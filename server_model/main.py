@@ -95,6 +95,7 @@ class EvaluationRequest(BaseModel):
     trigger_type: Literal["manual", "scheduled"] = "manual"
     max_batches: int = Field(default=6, ge=1, le=60)
     after_retraining: bool = False
+    start_batch_index: int = Field(default=0, ge=0)
     batch_delay_seconds: Optional[float] = Field(default=None, ge=0, le=60)
 
 
@@ -185,7 +186,7 @@ def _build_forecast_series() -> list[Dict[str, Any]]:
 
 
 def _build_batch_forecast_series(batch_index: int, after_retraining: bool = False) -> list[Dict[str, Any]]:
-    start = _now().date() - timedelta(days=(batch_index + 1) * 7)
+    start = _now().date() - timedelta(days=7) + timedelta(days=batch_index * 7)
     points: list[Dict[str, Any]] = []
     for day_offset in range(7):
         day = start + timedelta(days=day_offset)
@@ -345,10 +346,14 @@ def _evaluate_retraining_need(
     }
 
 
-def _build_test_batches(max_batches: int, after_retraining: bool = False) -> list[Dict[str, Any]]:
+def _build_test_batches(
+    max_batches: int,
+    after_retraining: bool = False,
+    start_batch_index: int = 0,
+) -> list[Dict[str, Any]]:
     max_batches = max(1, min(max_batches, 12))
     batches: list[Dict[str, Any]] = []
-    for index in range(max_batches):
+    for index in range(start_batch_index, start_batch_index + max_batches):
         points = _build_batch_forecast_series(index, after_retraining=after_retraining)
         batches.append(
             {
@@ -869,18 +874,15 @@ def _timeline_event(status: str, message: str, batch: Optional[Dict[str, Any]] =
 
 
 def _training_scope(batch_results: list[Dict[str, Any]], failed_batch: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    previous_batches = [
+        batch
+        for batch in batch_results
+        if not failed_batch or batch["batch_index"] < failed_batch["batch_index"]
+    ]
     return {
         "strategy": "before_failed_batch",
-        "batch_ids": [
-            batch["batch_id"]
-            for batch in batch_results
-            if not failed_batch or batch["batch_index"] < failed_batch["batch_index"]
-        ],
-        "until": (
-            batch_results[failed_batch["batch_index"] - 1]["end_at"]
-            if failed_batch and failed_batch["batch_index"] > 0
-            else None
-        ),
+        "batch_ids": [batch["batch_id"] for batch in previous_batches],
+        "until": previous_batches[-1]["end_at"] if previous_batches else None,
     }
 
 
@@ -934,6 +936,8 @@ def _new_evaluation_state(payload: EvaluationRequest) -> Dict[str, Any]:
         "threshold_note": "재학습 필요 여부는 모델 result의 RMSE를 기존 운영 RMSE와 비교해 판단합니다.",
         "batch_size_days": 7,
         "total_batches": total_batches,
+        "start_batch_index": payload.start_batch_index,
+        "start_batch_id": f"batch_{payload.start_batch_index + 1:03d}",
         "batch_results": [],
         "failed_batch": None,
         "retraining": {
@@ -959,7 +963,7 @@ def _new_evaluation_state(payload: EvaluationRequest) -> Dict[str, Any]:
         "timeline_events": [
             _timeline_event(
                 "queued",
-                f"7일 단위 테스트 배치 {total_batches}개가 평가 대기열에 등록되었습니다.",
+                f"{payload.start_batch_index + 1}번째 7일 배치부터 {total_batches}개 배치가 평가 대기열에 등록되었습니다.",
             )
         ],
     }
@@ -986,7 +990,11 @@ def _run_batch_evaluation_worker(evaluation_id: str, payload: EvaluationRequest)
     failed_batch: Optional[Dict[str, Any]] = None
 
     try:
-        batches = _build_test_batches(payload.max_batches, after_retraining=payload.after_retraining)
+        batches = _build_test_batches(
+            payload.max_batches,
+            after_retraining=payload.after_retraining,
+            start_batch_index=payload.start_batch_index,
+        )
         with APP_STATE_LOCK:
             evaluation = APP_STATE["evaluations"][evaluation_id]
             evaluation["status"] = "running"
@@ -1368,6 +1376,12 @@ def create_training_job(payload: TrainingJobRequest):
         batch for batch in source_evaluation.get("batch_results", [])
         if batch["batch_id"] in training_batch_ids
     ]
+    failed_batch = source_evaluation.get("failed_batch")
+    next_batch_index = (
+        failed_batch["batch_index"] + 1
+        if failed_batch
+        else source_evaluation.get("start_batch_index", 0) + len(source_evaluation.get("batch_results", []))
+    )
     job = {
         "job_id": _next_id("job"),
         "decision_id": payload.decision_id,
@@ -1384,14 +1398,19 @@ def create_training_job(payload: TrainingJobRequest):
             "batch_unit": TARGET_CONFIG["batch_unit"],
             "batch_size": TARGET_CONFIG["batch_size"],
         },
-        "note": "기존 운영 모델을 덮어쓴 뒤 7일 배치 성능 테스트 작업을 새로 시작합니다.",
+        "note": f"기존 운영 모델을 덮어쓴 뒤 {next_batch_index + 1}번째 7일 배치부터 성능 테스트 작업을 이어서 시작합니다.",
+        "next_evaluation_start_batch_index": next_batch_index,
         "created_at": _iso(),
         "finished_at": None,
     }
     job["model_update_result"] = _retrain_overwrite_model(training_batches, payload, job["job_id"])
     if payload.rerun_evaluation:
         job["followup_evaluation"] = _start_batch_evaluation(
-            EvaluationRequest(trigger_type="manual", after_retraining=True)
+            EvaluationRequest(
+                trigger_type="manual",
+                after_retraining=True,
+                start_batch_index=next_batch_index,
+            )
         )
     job["finished_at"] = _iso()
     APP_STATE["latest_training_job"] = job

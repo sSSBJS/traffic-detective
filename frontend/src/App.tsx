@@ -94,6 +94,19 @@ function mergeBatchResults(...groups: BatchResult[][]) {
   return [...byBatchId.values()].sort((a, b) => a.batch_index - b.batch_index);
 }
 
+function mergeForecastPointsFromBatches(batches: BatchResult[]) {
+  const byTimestamp = new Map<string, ForecastPoint>();
+  for (const batch of batches) {
+    for (const point of batch.forecast_points) {
+      byTimestamp.set(point.timestamp, point);
+    }
+  }
+
+  return [...byTimestamp.values()].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+  );
+}
+
 function formatChartTime(iso: string) {
   try {
     return new Intl.DateTimeFormat("ko-KR", {
@@ -162,7 +175,20 @@ function buildAreaPath(coords: { x: number; y: number }[], bottomY: number) {
   return d;
 }
 
-function ForecastChart({ points, compact }: { points: ForecastPoint[]; compact?: boolean }) {
+type ChartMarker = {
+  timestamp: string;
+  label: string;
+};
+
+function ForecastChart({
+  points,
+  compact,
+  marker,
+}: {
+  points: ForecastPoint[];
+  compact?: boolean;
+  marker?: ChartMarker | null;
+}) {
   const chartUid = useId().replace(/:/g, "");
 
   if (!points.length) {
@@ -199,6 +225,14 @@ function ForecastChart({ points, compact }: { points: ForecastPoint[]; compact?:
   const xLabelIdx = [...new Set([0, Math.floor((points.length - 1) / 2), points.length - 1])].sort(
     (a, b) => a - b,
   );
+  const markerIndex = marker
+    ? points.findIndex(
+        (point) => new Date(point.timestamp).getTime() >= new Date(marker.timestamp).getTime(),
+      )
+    : -1;
+  const markerX = markerIndex >= 0 ? actualCoords[markerIndex]?.x : null;
+  const markerLabelAnchor =
+    markerX !== null && markerX < 150 ? "start" : markerX !== null && markerX > width - 170 ? "end" : "middle";
 
   return (
     <div
@@ -222,6 +256,12 @@ function ForecastChart({ points, compact }: { points: ForecastPoint[]; compact?:
               <span className="h-0.5 w-6 rounded-full bg-violet-400" />
               예측
             </span>
+            {marker ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-3 w-0.5 rounded-full bg-amber-300" />
+                재학습 적용
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -288,6 +328,41 @@ function ForecastChart({ points, compact }: { points: ForecastPoint[]; compact?:
             d={buildAreaPath(predictedCoords, bottomY)}
             fill={`url(#areaPred-${chartUid})`}
           />
+
+          {marker && markerX !== null ? (
+            <g>
+              <line
+                x1={markerX}
+                y1="24"
+                x2={markerX}
+                y2={bottomY}
+                stroke="rgb(252 211 77)"
+                strokeWidth="2"
+                strokeDasharray="5 5"
+                vectorEffect="non-scaling-stroke"
+              />
+              <rect
+                x={markerLabelAnchor === "start" ? markerX + 6 : markerLabelAnchor === "end" ? markerX - 104 : markerX - 49}
+                y="30"
+                width="98"
+                height="24"
+                rx="6"
+                fill="rgb(39 39 42)"
+                stroke="rgb(180 83 9)"
+                strokeOpacity="0.8"
+              />
+              <text
+                x={markerLabelAnchor === "start" ? markerX + 55 : markerLabelAnchor === "end" ? markerX - 55 : markerX}
+                y="46"
+                textAnchor="middle"
+                fill="rgb(253 230 138)"
+                fontSize="11"
+                fontWeight="600"
+              >
+                {marker.label}
+              </text>
+            </g>
+          ) : null}
 
           <polyline
             points={coordsToPolyline(actualCoords)}
@@ -396,6 +471,31 @@ export default function App() {
     () => mergeBatchResults(carriedBatchResults, evaluation?.batch_results ?? []),
     [carriedBatchResults, evaluation?.batch_results],
   );
+  const visibleForecastPoints = useMemo(() => {
+    const points = mergeForecastPointsFromBatches(visibleBatchResults);
+    return points.length ? points : evaluation?.forecast_points ?? [];
+  }, [evaluation?.forecast_points, visibleBatchResults]);
+  const retrainingMarker = useMemo<ChartMarker | null>(() => {
+    const followupEvaluation = trainingJob?.followup_evaluation;
+    if (!followupEvaluation) {
+      return null;
+    }
+
+    const firstRetrainedBatch =
+      visibleBatchResults.find((batch) => batch.batch_index === followupEvaluation.start_batch_index) ??
+      followupEvaluation.batch_results[0];
+    const timestamp =
+      firstRetrainedBatch?.forecast_points[0]?.timestamp ??
+      followupEvaluation.current_batch?.start_at ??
+      null;
+
+    return timestamp
+      ? {
+          timestamp,
+          label: "재학습 적용",
+        }
+      : null;
+  }, [trainingJob?.followup_evaluation, visibleBatchResults]);
 
   async function refreshState() {
     const [statusData, evaluationData, reportData, historyData] =
@@ -828,13 +928,13 @@ export default function App() {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="rounded-full bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-300 ring-1 ring-zinc-700/80">
-                  {evaluation ? `${evaluation.forecast_points.length} 포인트` : "평가 전"}
+                  {evaluation ? `${visibleForecastPoints.length} 포인트` : "평가 전"}
                 </span>
               </div>
             </div>
           </div>
           <div className="p-6 sm:p-8 sm:pt-6">
-            <ForecastChart points={evaluation?.forecast_points ?? []} />
+            <ForecastChart points={visibleForecastPoints} marker={retrainingMarker} />
           </div>
 
           <div id="report" className="scroll-mt-28 border-t border-zinc-800 bg-zinc-950/30 px-6 py-8 sm:px-8">
@@ -1062,7 +1162,7 @@ export default function App() {
               <div className="grid gap-5 border-b border-zinc-800 bg-zinc-900/40 px-4 py-5 lg:grid-cols-2 lg:gap-6 sm:px-6">
                 <div className="min-w-0">
                   <p className="m-0 mb-3 text-sm font-semibold text-zinc-200">성능 저하 그래프</p>
-                  <ForecastChart points={evaluation?.forecast_points ?? []} />
+                  <ForecastChart points={visibleForecastPoints} marker={retrainingMarker} />
                 </div>
                 <div className="min-h-0 min-w-0">
                   <p className="m-0 mb-3 text-sm font-semibold text-zinc-200">보고서</p>

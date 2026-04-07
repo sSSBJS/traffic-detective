@@ -149,6 +149,8 @@ export interface Evaluation {
   threshold_note: string;
   batch_size_days: number;
   total_batches: number;
+  start_batch_index: number;
+  start_batch_id: string;
   batch_results: BatchResult[];
   failed_batch: BatchResult | null;
   retraining: RetrainingDecision;
@@ -210,6 +212,7 @@ export interface TrainingJob {
   } | null;
   source_evaluation_id: string;
   training_scope: TrainingScope;
+  next_evaluation_start_batch_index?: number;
   followup_evaluation: Evaluation | null;
   created_at: string;
   finished_at: string | null;

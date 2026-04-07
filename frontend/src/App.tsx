@@ -1,5 +1,4 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { HeaderNav } from "./components/HeaderNav";
 import { ReportMarkdown } from "./components/ReportMarkdown";
 import {
   createDecision,
@@ -458,12 +457,6 @@ export default function App() {
         baseline: evaluation.baseline_metrics.smape,
         change: `${evaluation.comparison.smape_change_rate}%`,
       },
-      {
-        label: "R2",
-        current: evaluation.current_metrics.r2,
-        baseline: evaluation.baseline_metrics.r2,
-        change: `-${evaluation.comparison.r2_drop}`,
-      },
     ];
   }, [evaluation]);
 
@@ -726,11 +719,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen text-zinc-200">
-      <HeaderNav
-        statusLabel={healthLabels[healthStatus]}
-        datasetId={systemStatus?.target_config.dataset_id}
-        metric={systemStatus?.target_config.metric}
-      />
+      <header className="border-b border-zinc-800">
+        <div className="mx-auto max-w-7xl px-5 py-4 lg:px-8">
+        </div>
+      </header>
 
       <main className="mx-auto max-w-7xl space-y-10 px-5 py-10 lg:px-8">
         {error ? (
@@ -973,11 +965,10 @@ export default function App() {
                               </span>
                               <span className={`text-sm font-medium ${statusCls}`}>{statusKo}</span>
                             </div>
-                            <div className="mt-4 grid max-w-2xl grid-cols-3 gap-x-5 gap-y-3 sm:gap-x-10 sm:gap-y-4">
+                            <div className="mt-4 grid max-w-xl grid-cols-2 gap-x-5 gap-y-3 sm:gap-x-10 sm:gap-y-4">
                               {[
                                 { k: "RMSE", v: batch.metrics.rmse },
                                 { k: "SMAPE", v: batch.metrics.smape },
-                                { k: "R²", v: batch.metrics.r2 },
                               ].map((cell) => (
                                 <div
                                   key={cell.k}
@@ -1089,10 +1080,10 @@ export default function App() {
           <div className="flex flex-col gap-3 border-b border-zinc-800 pb-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="m-0 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                현재 세션 기록
+                current event log
               </p>
               <h2 className="m-0 mt-1 text-2xl font-semibold tracking-tight text-zinc-100">
-                세션 기록
+                event log
               </h2>
             </div>
             <span className="w-fit rounded-full bg-zinc-800 px-3 py-1 text-xs font-medium text-zinc-300 ring-1 ring-zinc-700/80">

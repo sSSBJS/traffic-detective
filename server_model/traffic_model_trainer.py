@@ -42,7 +42,6 @@ def retrain_model(
         order=tuple(bundle["order"]),
         seasonal_order=tuple(bundle["seasonal_order"]),
         metric=bundle["metric"],
-        rmse_threshold=float(bundle.get("rmse_threshold", 60000.0)),
         artifact_path=target_artifact_path,
     )
     saved_path = save_model(retrained_bundle, target_artifact_path)
@@ -54,6 +53,9 @@ def retrain_model(
         "train_rows": retrained_bundle["train_rows"],
         "train_start_at": retrained_bundle["train_start_at"],
         "train_end_at": retrained_bundle["train_end_at"],
+        "rmse": retrained_bundle["rmse"],
+        "smape": retrained_bundle["smape"],
+        "r2": retrained_bundle["r2"],
         "rmse_threshold": retrained_bundle["rmse_threshold"],
     }
 

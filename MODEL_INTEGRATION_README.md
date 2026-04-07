@@ -254,11 +254,11 @@ current_rmse > previous_rmse * (1 + RETRAINING_THRESHOLD_RATIO)
 기본 환경변수:
 
 ```env
-RETRAINING_THRESHOLD_RATIO=0.15
+RETRAINING_THRESHOLD_RATIO=0.60
 RETRAINING_STALE_AFTER_DAYS=30
 ```
 
-즉 기준 RMSE가 `125.0`이고 현재 RMSE가 `143.75`를 넘으면 재학습 필요로 판단합니다.
+즉 기준 RMSE가 `772.59`이고 현재 RMSE가 `1236.14`를 넘으면 재학습 필요로 판단합니다.
 
 ## 7. 배치 API
 
@@ -313,17 +313,17 @@ MODEL_TRAINER_MODULE=server_model.traffic_model_trainer
 
 ## 9. 연동 체크리스트
 
-1. 모델 파일이 컨테이너 내부에서 접근 가능한 경로에 있는지 확인합니다.
+1. `data/605036.csv`의 최초 30일 데이터로 미리 학습한 `server/model/runtime/active_traffic_model.pkl`이 컨테이너 내부에서 접근 가능한지 확인합니다.
 2. `MODEL_LOADER_MODULE`의 `load_model(path)`가 모델 객체를 반환하는지 확인합니다.
 3. `MODEL_EVALUATOR_MODULE`의 `evaluate_batch(batch, model)`가 `rmse`, `smape`, `r2`, `predictions`, `actuals`를 반환하는지 확인합니다.
 4. `MODEL_TRAINER_MODULE`의 `retrain_model(...)`가 `target_artifact_path`에 모델을 덮어쓰는지 확인합니다.
-5. `POST /api/v1/admin/update-model`에 초기 모델의 `metadata.rmse`를 넣어 기준 RMSE를 등록합니다.
-6. `POST /api/v1/evaluations`를 실행하고 `GET /api/v1/evaluations/{evaluation_id}`에서 `batch_results`가 쌓이는지 확인합니다.
+5. 외부에서 학습한 모델로 교체할 때만 `POST /api/v1/admin/update-model`에 모델 artifact와 `metadata.rmse`를 등록합니다.
+6. `POST /api/v1/evaluations`를 실행하고 `GET /api/v1/evaluations/{evaluation_id}`에서 최초 30일 이후 데이터가 7일 배치로 쌓이는지 확인합니다.
 7. 재학습 승인 후 후속 평가가 중단 배치 다음 배치부터 시작하는지 확인합니다.
 
 ## 10. 현재 주의사항
 
-- 최초 학습 자동 실행은 아직 백엔드에 구현되어 있지 않습니다. 현재는 운영 시작 전에 학습된 모델 파일을 만들고 `/api/v1/admin/update-model`로 등록하는 전제입니다.
+- 최초 학습은 Docker 시작 전에 실행해 pkl artifact로 포함합니다. Docker 시작 시에는 `server/model/runtime/active_traffic_model.pkl`을 로드만 합니다.
 - 재학습은 후보 모델을 만들지 않고 기존 운영 모델 파일을 덮어씁니다.
 - 실제 데이터 소스 연동 시에는 `server_model/main.py`의 `_build_test_batches(...)`를 mock 생성 대신 7일치 트래픽 데이터를 가져오는 코드로 교체하는 것이 좋습니다.
 - GPT 보고서를 사용하려면 `OPENAI_API_KEY`가 컨테이너 환경에 들어가 있어야 합니다.

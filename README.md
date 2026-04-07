@@ -77,7 +77,7 @@ export MODEL_TRAINER_MODULE=server_model.traffic_model_trainer
 docker compose up --build
 ```
 
-The traffic model modules now default to the `server_model/` integration files. If the runtime artifact does not exist yet, the first load bootstraps `server/model/runtime/active_traffic_model.pkl` from `data/simulated_trend_data.csv`.
+The traffic model modules now default to the `server_model/` integration files. The backend loads the pre-trained `server/model/runtime/active_traffic_model.pkl` on startup, and batch evaluation starts from the data after the initial 30-day training window.
 
 The loader module should expose one of these functions:
 

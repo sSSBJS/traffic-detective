@@ -10,6 +10,7 @@ import {
   getLatestEvaluation,
   getLatestReport,
   getSystemStatus,
+  type BatchResult,
   type Evaluation,
   type ForecastPoint,
   type HealthStatus,
@@ -80,6 +81,17 @@ function delay(ms: number) {
 
 function pollingDelayForStatus(status: Evaluation["status"]) {
   return status === "generating_report" ? 3000 : 850;
+}
+
+function mergeBatchResults(...groups: BatchResult[][]) {
+  const byBatchId = new Map<string, BatchResult>();
+  for (const group of groups) {
+    for (const batch of group) {
+      byBatchId.set(batch.batch_id, batch);
+    }
+  }
+
+  return [...byBatchId.values()].sort((a, b) => a.batch_index - b.batch_index);
 }
 
 function formatChartTime(iso: string) {
@@ -350,6 +362,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [lastReportPromptReportId, setLastReportPromptReportId] = useState<string | null>(null);
+  const [carriedBatchResults, setCarriedBatchResults] = useState<BatchResult[]>([]);
   const activePollRef = useRef<{ evaluationId: string; token: number } | null>(null);
 
   const metricRows = useMemo(() => {
@@ -378,6 +391,11 @@ export default function App() {
       },
     ];
   }, [evaluation]);
+
+  const visibleBatchResults = useMemo(
+    () => mergeBatchResults(carriedBatchResults, evaluation?.batch_results ?? []),
+    [carriedBatchResults, evaluation?.batch_results],
+  );
 
   async function refreshState() {
     const [statusData, evaluationData, reportData, historyData] =
@@ -463,6 +481,10 @@ export default function App() {
         return;
       }
       setEvaluation(nextEvaluation);
+      if (nextEvaluation.status === "generating_report" && nextEvaluation.failed_batch) {
+        setIsReportModalOpen(true);
+        setMessage("성능 저하가 감지되었습니다. 보고서를 생성하는 중입니다.");
+      }
       if (options.afterRetraining) {
         setTrainingJob((currentJob) =>
           currentJob?.followup_evaluation?.evaluation_id === evaluationId
@@ -481,6 +503,10 @@ export default function App() {
           return;
         }
         setEvaluation(nextEvaluation);
+        if (nextEvaluation.status === "generating_report" && nextEvaluation.failed_batch) {
+          setIsReportModalOpen(true);
+          setMessage("성능 저하가 감지되었습니다. 보고서를 생성하는 중입니다.");
+        }
         if (options.afterRetraining) {
           setTrainingJob((currentJob) =>
             currentJob?.followup_evaluation?.evaluation_id === evaluationId
@@ -527,6 +553,7 @@ export default function App() {
     await runAction("evaluation", async () => {
       const startedEvaluation = await createEvaluation("manual");
       setEvaluation(startedEvaluation);
+      setCarriedBatchResults([]);
       setReport(null);
       setIsReportModalOpen(false);
       setMessage("7일 단위 배치 성능 평가를 시작했습니다.");
@@ -540,6 +567,10 @@ export default function App() {
         throw new Error("먼저 보고서를 생성해주세요.");
       }
       const sourceReportId = report.report_id;
+      const nextCarriedBatchResults = mergeBatchResults(
+        carriedBatchResults,
+        evaluation?.batch_results ?? [],
+      );
 
       const savedDecision = await createDecision(
         sourceReportId,
@@ -549,6 +580,7 @@ export default function App() {
       const nextJob = await createTrainingJob(savedDecision.decision_id);
       setTrainingJob(nextJob);
       if (nextJob.followup_evaluation) {
+        setCarriedBatchResults(nextCarriedBatchResults);
         setEvaluation(nextJob.followup_evaluation);
         void pollEvaluation(nextJob.followup_evaluation.evaluation_id, {
           afterRetraining: true,
@@ -583,6 +615,10 @@ export default function App() {
 
   const healthStatus = systemStatus?.latest_health_status ?? "unknown";
   const isCurrentEvaluationActive = isEvaluationActive(evaluation);
+  const isReportGenerating =
+    evaluation?.status === "generating_report" && Boolean(evaluation.failed_batch);
+  const modalHealthStatus = evaluation?.health_status ?? healthStatus;
+  const shouldShowReportModal = isReportModalOpen && (Boolean(report) || isReportGenerating);
   const canRetrain =
     Boolean(report) &&
     !isCurrentEvaluationActive &&
@@ -734,7 +770,7 @@ export default function App() {
               <div className="mt-5 space-y-4">
                 <div className="rounded-xl border border-zinc-700/80 bg-zinc-950/50 px-3 py-2.5 text-sm text-zinc-300 ring-1 ring-zinc-800/80">
                   <span className="font-semibold capitalize text-zinc-100">{evaluation.status}</span>
-                  <span className="text-zinc-500"> · 배치 {evaluation.batch_results.length}건</span>
+                  <span className="text-zinc-500"> · 배치 {visibleBatchResults.length}건</span>
                   {evaluation.current_batch ? (
                     <span className="text-zinc-400"> · 처리 중 {evaluation.current_batch.batch_id}</span>
                   ) : null}
@@ -816,7 +852,7 @@ export default function App() {
                 </div>
 
                 <div className="overflow-hidden rounded-lg border border-zinc-700/90">
-                  {evaluation.batch_results.map((batch, rowIdx) => {
+                  {visibleBatchResults.map((batch, rowIdx) => {
                     const statusKey = batch.retraining.status;
                     const statusKo = retrainingStatusLabel[statusKey] ?? statusKey;
                     const statusCls = retrainingStatusTextClass(statusKey);
@@ -879,7 +915,7 @@ export default function App() {
                     </div>
                   ) : null}
 
-                  {!evaluation.batch_results.length && !evaluation.current_batch ? (
+                  {!visibleBatchResults.length && !evaluation.current_batch ? (
                     <p className="m-0 px-4 py-10 text-center text-sm text-zinc-500">
                       평가를 시작하면 배치별 지표가 여기에 쌓입니다.
                     </p>
@@ -986,17 +1022,19 @@ export default function App() {
         </section>
       </main>
 
-      {isReportModalOpen && report ? (
+      {shouldShowReportModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 px-3 py-6 backdrop-blur-[3px] sm:px-5">
           <div
-            className="flex w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-zinc-700/90 bg-zinc-950 shadow-2xl shadow-violet-950/20 ring-1 ring-violet-500/15"
-            style={{ maxHeight: "min(90vh, 820px)" }}
+            className="flex w-full max-w-7xl flex-col overflow-hidden rounded-2xl border border-zinc-700/90 bg-zinc-950 shadow-2xl shadow-violet-950/20 ring-1 ring-violet-500/15"
+            style={{ maxHeight: "min(94vh, 940px)" }}
           >
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-zinc-800 px-4 py-4 sm:px-6">
               <div className="min-w-0">
-                <p className="m-0 text-xs font-medium text-zinc-500">평가 완료</p>
+                <p className="m-0 text-xs font-medium text-zinc-500">
+                  성능 저하 감지
+                </p>
                 <h2 className="m-0 mt-0.5 text-lg font-semibold text-zinc-100 sm:text-xl">
-                  보고서가 생성되었습니다
+                  현재 성능 결과 재학습이 필요합니다
                 </h2>
               </div>
               <button
@@ -1010,24 +1048,38 @@ export default function App() {
 
             <div className="shrink-0 border-b border-zinc-800 px-4 py-3 sm:px-6">
               <p className="m-0 text-sm leading-relaxed text-zinc-400">
-                현재 성능 결과는 <strong className="text-zinc-100">{healthLabels[healthStatus]}</strong>{" "}
+                현재 성능 결과는 <strong className="text-zinc-100">{healthLabels[modalHealthStatus]}</strong>{" "}
                 상태입니다.
-                {healthStatus === "degraded"
-                  ? " 성능 지표가 재학습 정책 기준을 넘어 재학습이 필요할 수 있습니다."
+                {modalHealthStatus === "degraded"
+                  ? report
+                    ? " 성능 지표가 재학습 정책 기준을 넘었습니다. 보고서 내용을 확인한 뒤 재학습 여부를 결정해 주세요."
+                    : " 성능 지표가 재학습 정책 기준을 넘어 보고서를 생성하는 중입니다."
                   : " 아래 내용을 확인해 주세요."}
               </p>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-              <div className="grid gap-4 border-b border-zinc-800 bg-zinc-900/40 px-4 py-4 sm:grid-cols-2 sm:gap-5 sm:px-6 sm:py-4">
+              <div className="grid gap-5 border-b border-zinc-800 bg-zinc-900/40 px-4 py-5 lg:grid-cols-2 lg:gap-6 sm:px-6">
                 <div className="min-w-0">
-                  <p className="m-0 mb-2 text-xs font-medium text-zinc-500">성능 추이</p>
-                  <ForecastChart compact points={evaluation?.forecast_points ?? []} />
+                  <p className="m-0 mb-3 text-sm font-semibold text-zinc-200">성능 저하 그래프</p>
+                  <ForecastChart points={evaluation?.forecast_points ?? []} />
                 </div>
                 <div className="min-h-0 min-w-0">
-                  <p className="m-0 mb-2 text-xs font-medium text-zinc-500">보고서</p>
-                  <div className="modal-scroll max-h-[min(40vh,320px)] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950/80 p-4 sm:max-h-[min(42vh,340px)]">
-                    <ReportMarkdown markdown={report.markdown} />
+                  <p className="m-0 mb-3 text-sm font-semibold text-zinc-200">보고서</p>
+                  <div className="modal-scroll max-h-[min(58vh,620px)] overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-950/80 p-4 sm:p-5">
+                    {report ? (
+                      <ReportMarkdown markdown={report.markdown} />
+                    ) : (
+                      <div className="flex min-h-[260px] flex-col items-center justify-center text-center">
+                        <div className="mb-4 h-10 w-10 animate-spin rounded-full border-2 border-zinc-700 border-t-violet-400" />
+                        <p className="m-0 text-sm font-semibold text-zinc-100">
+                          GPT 기반 보고서를 생성하고 있습니다
+                        </p>
+                        <p className="m-0 mt-2 max-w-sm text-sm leading-relaxed text-zinc-500">
+                          성능 저하가 감지된 배치의 지표와 예측 그래프를 분석하는 중입니다. 보고서가 준비되면 이 영역에 바로 표시됩니다.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

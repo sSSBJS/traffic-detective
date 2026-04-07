@@ -72,8 +72,12 @@ Set a token for the admin endpoint:
 ```bash
 export MODEL_ADMIN_TOKEN=change-me
 export MODEL_LOADER_MODULE=server_model.traffic_model_loader
+export MODEL_EVALUATOR_MODULE=server_model.traffic_model_evaluator
+export MODEL_TRAINER_MODULE=server_model.traffic_model_trainer
 docker compose up --build
 ```
+
+The traffic model modules now default to the `server_model/` integration files. If the runtime artifact does not exist yet, the first load bootstraps `server/model/runtime/active_traffic_model.pkl` from `data/simulated_trend_data.csv`.
 
 The loader module should expose one of these functions:
 

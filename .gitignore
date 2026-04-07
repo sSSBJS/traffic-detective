@@ -46,3 +46,5 @@ server/view-model-architecture/*
 # Generated model artifacts
 server/model/result/*
 !server/model/result/.gitkeep
+server/model/runtime/*
+!server/model/runtime/.gitkeep

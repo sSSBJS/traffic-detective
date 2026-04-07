@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { HeaderNav } from "./components/HeaderNav";
 import { ReportMarkdown } from "./components/ReportMarkdown";
 import {
@@ -76,6 +76,10 @@ function delay(ms: number) {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function pollingDelayForStatus(status: Evaluation["status"]) {
+  return status === "generating_report" ? 3000 : 850;
 }
 
 function formatChartTime(iso: string) {

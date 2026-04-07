@@ -1,0 +1,33 @@
+services:
+  traffic-aiops-studio:
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: /
+    ports:
+      - "8001:8001"
+    environment:
+      BASE_DIR: /app/server
+      APP_ROOT_PATH: ""
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_REPORT_MODEL: ${OPENAI_REPORT_MODEL:-gpt-5-mini}
+      MODEL_ADMIN_TOKEN: ${MODEL_ADMIN_TOKEN:-change-me}
+      MODEL_LOADER_MODULE: ${MODEL_LOADER_MODULE:-}
+      MODEL_EVALUATOR_MODULE: ${MODEL_EVALUATOR_MODULE:-}
+      MODEL_TRAINER_MODULE: ${MODEL_TRAINER_MODULE:-}
+      BATCH_EVALUATION_DELAY_SECONDS: ${BATCH_EVALUATION_DELAY_SECONDS:-1.25}
+      RETRAINING_THRESHOLD_RATIO: ${RETRAINING_THRESHOLD_RATIO:-0.15}
+      RETRAINING_STALE_AFTER_DAYS: ${RETRAINING_STALE_AFTER_DAYS:-30}
+      MODEL_ARTIFACT_DIR: /app/server/model/runtime
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3).read()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s

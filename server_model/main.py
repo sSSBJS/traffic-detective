@@ -81,6 +81,7 @@ MVP_CURRENT_METRICS = {"rmse": 139.3, "smape": 11.8, "r2": -7.82}
 RETRAINING_THRESHOLD_RATIO = float(os.getenv("RETRAINING_THRESHOLD_RATIO", "0.15"))
 RETRAINING_STALE_AFTER_DAYS = int(os.getenv("RETRAINING_STALE_AFTER_DAYS", "30"))
 OPENAI_REPORT_MODEL = os.getenv("OPENAI_REPORT_MODEL", "gpt-5-mini")
+OPENAI_REPORT_TIMEOUT_SECONDS = float(os.getenv("OPENAI_REPORT_TIMEOUT_SECONDS", "45"))
 MODEL_ARTIFACT_DIR = Path(os.getenv("MODEL_ARTIFACT_DIR", str(Path(MODEL_DIR) / "runtime"))).resolve()
 MODEL_LOADER_MODULE = os.getenv("MODEL_LOADER_MODULE")
 MODEL_EVALUATOR_MODULE = os.getenv("MODEL_EVALUATOR_MODULE")
@@ -566,7 +567,7 @@ def _generate_gpt_report_markdown(evaluation: Dict[str, Any]) -> tuple[str, str,
         method="POST",
     )
     try:
-        with urlrequest.urlopen(request, timeout=12) as response:
+        with urlrequest.urlopen(request, timeout=OPENAI_REPORT_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (urlerror.URLError, urlerror.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
         return fallback, "fallback_openai_error", str(exc)
